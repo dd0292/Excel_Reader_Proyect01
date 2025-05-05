@@ -45,8 +45,62 @@ class TableProcessor:
         df: pd.DataFrame,
         column_definitions: Dict[str, Union[str, Dict, Callable]], 
         source_tables: Dict[str, pd.DataFrame] = None, 
-        save_to_db: bool = True
+        save_to_db: bool = True,
+        print_unmatched: bool = True
     ) -> pd.DataFrame:
+
+        """
+        Adds new columns to a DataFrame based on various definition types, including 
+        expressions, dictionary-based merges with external tables, or custom functions.
+
+        Parameters:
+        ----------
+        table_name : str
+            The name of the table to update or create in the database.
+        
+        df : pd.DataFrame
+            The main DataFrame to which new columns will be added. If None, it is loaded from the database.
+        
+        column_definitions : Dict[str, Union[str, Dict, Callable]]
+            A dictionary where each key is a new column name, and each value defines how that column is calculated.
+            
+        Supported definition types:
+        - `str`: An expression to be evaluated with `pandas.eval`.
+        - `dict`: Describes a merge operation with another table using:
+            - `source_table`: str - table to join from
+            - `join_on`: str - column in the source table
+            - `join_target`: str (optional) - column in `df` to join on (defaults to `join_on`)
+            - `source_column`: str (optional) - column to extract from the source table (defaults to new column name)
+        - `Callable`: A function applied row-wise to compute the column.
+        
+        source_tables : Dict[str, pd.DataFrame], optional
+            A dictionary of source DataFrames to use for merges, avoiding redundant database queries.
+            If not provided, tables are retrieved using `self.GetTables()`.
+
+        save_to_db : bool, default=True
+            Whether to overwrite the table in the database after processing.
+
+        print_unmatched : bool, default=True
+            If True, logs to a file (`merge_warnings.txt`) all the keys in the main DataFrame that 
+            could not find a match during the merge process.
+
+        Returns:
+        -------
+        pd.DataFrame
+            The modified DataFrame with the newly added columns.
+
+        Raises:
+        ------
+        ValueError
+            If a definition is invalid, a required column is missing from the source table,
+            or a function fails during application.
+
+        Notes:
+        -----
+        - Mismatches during merges are logged in `merge_warnings.txt` with context about the table, 
+        join keys, and unmatched values.
+        - This function is suitable for dynamic feature engineering in ETL workflows or report generation pipelines.
+        """
         
         self.connect()
 
@@ -55,9 +109,9 @@ class TableProcessor:
 
         merge_tasks = {}
         log_file = open("merge_warnings.txt", "a", encoding="utf-8")
-        log_file.write(f"\n--- Logging for table: {table_name} ---\n")
 
         for new_col, definition in column_definitions.items():
+            
             if isinstance(definition, str):
                 try:
                     df[new_col] = df.eval(definition)
@@ -105,22 +159,24 @@ class TableProcessor:
                     right_on=join_on
                 ).rename(columns={source_col: new_col})
 
-                # Identify unmatched rows
                 unmatched_rows = temp_df[temp_df[new_col].isna()]
-                if not unmatched_rows.empty:
-                    log_file.write(f"\n[Warning] {new_col}: {len(unmatched_rows)} unmatched rows when joining on '{join_target}' -> '{join_on}' from '{source_table}'\n")
-                    log_file.write(unmatched_rows[[join_target]].drop_duplicates().to_string(index=False))
+                if not unmatched_rows.empty and print_unmatched:
+                
+                    log_file.write(f"\n--- Registro para la tabla: {table_name} ---\n")
+                    log_file.write(f"\n[Advertencia] {new_col}: {len(unmatched_rows)} filas no coincidentes al unir '{join_target}' -> '{join_on}' desde '{source_table}'\n")
+                    log_file.write(f"\t {unmatched_rows[[join_target]].drop_duplicates().to_string(index=False)}")
                     log_file.write("\n")
-
+                    log_file.write(f"--- Fin de la tabla: {table_name} ---\n\n")
+                    
                 df = temp_df
 
-        log_file.write(f"--- End of table: {table_name} ---\n\n")
         log_file.close()
 
         if save_to_db:
             df.to_sql(table_name, self.conn, if_exists='replace', index=False)
 
         return df
+
 
     def ListTables(self) -> List[str]:
         """List all tables in the database.
