@@ -19,6 +19,7 @@ FUNCIONES:
     3. COMPLETAR VENTA HISTORICA
     4. PIVOTEAR & DESCARGAR [VENTA BRUTA]
     5. PIVOTEAR & DESCARGAR [VENTA NETA] 
+    6. PIVOTEAR & DESCARGAR [VENTA POR CANAL] 
 
 CONTROL:
     6. TABLAS EN LA BASE DE DATOS
@@ -49,18 +50,20 @@ def main_menu(processor: MODEL.TableProcessor):
             CONTROLLER._pivotearDescargar_VENTA_BRUTA(processor)
         elif choice == "5":
             CONTROLLER._pivotearDescargar_VENTA_NETA(processor)
-
         elif choice == "6":
-            CONTROLLER._listDataBase(processor)
+            CONTROLLER._pivotearDescargar_VENTA_POR_CANAL(processor)
+
         elif choice == "7":
-            CONTROLLER._printColumnsTableFromDataBase(processor)
+            CONTROLLER._listDataBase(processor)
         elif choice == "8":
-            CONTROLLER._printCompleteTableFromDataBase(processor)
+            CONTROLLER._printColumnsTableFromDataBase(processor)
         elif choice == "9":
-            CONTROLLER._deleteTableFromDataBase(processor)
+            CONTROLLER._printCompleteTableFromDataBase(processor)
         elif choice == "10":
-            CONTROLLER._downloadExcelFromDataBase(processor)
+            CONTROLLER._deleteTableFromDataBase(processor)
         elif choice == "11":
+            CONTROLLER._downloadExcelFromDataBase(processor)
+        elif choice == "12":
             CONTROLLER._pivoteTabels(processor)
 
         elif choice == "0":

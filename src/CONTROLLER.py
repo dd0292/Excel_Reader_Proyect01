@@ -55,7 +55,7 @@ def sub_add_CENTROS(df, processor: MODEL.TableProcessor):
     return processor.AddColumns(
         df=df,
         table_name='VentaHistoricaTOTAL',
-        column_definitions={'CENTROS': {
+        column_definitions={'CENTRO_FINAL': {
             'source_table': 'CENTROS',
             'join_on': 'CENTRO',
             'join_target': 'Centro', 
@@ -87,7 +87,8 @@ def sub_add_CANAL(df, processor: MODEL.TableProcessor):
     df['CANAL'] = df.apply(
         lambda row: (
             "WHOLESALE DEFERRET"
-            if str(row['Canal distribución']) == "20" and row['CENTROS'] == "G601"
+            if str(row['Canal distribución']) == "20" and row['CENTRO_FINAL'] == "G601"
+            else "B2B-RETAIL-WHOLESALE" if row['PAIS'] == "PAN - MODELO"
             else row['CANAL']
         ),
         axis=1
@@ -118,7 +119,7 @@ def sub_add_CLASIFICACION(df, processor: MODEL.TableProcessor):
         table_name='VentaHistoricaTOTAL',
         column_definitions={
             'CLASIFICACION': lambda row: (
-                "PROYECTOS B2B" if str(row["Canal distribución"]) == "30" and str(row["CENTROS"]) == "ZSER"
+                "PROYECTOS B2B" if str(row["Canal distribución"]) == "30" and str(row["Clase de factura"]) == "ZSER"
                 else "DEFERRET" if str(row["Artículo"]).startswith(("10074", "956", "951"))
                 else "PINTURA" if str(row["Artículo"]).startswith(("1", "2"))
                 else "APLICADORES" if str(row["Artículo"]).startswith("0")
@@ -182,8 +183,9 @@ def sub_add_MATERIAL(df, processor: MODEL.TableProcessor):
 
     df['MATERIAL'] = df.apply(
         lambda row: 
-        row['Artículo'] if str(row['PAIS']) == "GUATEMALA" and str(row['CANAL']) == "RETAIL"
-        else row['Artículo'] if pd.isna(row['MATERIAL']) 
+        "SER000306-03" if str(row['CLASIFICACION']) == "PROYECTOS B2B"
+        else "SER000306-03" if str(row['PAIS']) + str(row['CANAL']) + str(row['CLASIFICACION']) == "GUATEMALARETAILSERVICIO"
+        else row['Artículo'] if pd.isna(row['MATERIAL'])
         else row['MATERIAL'],
         axis=1
     )
@@ -191,30 +193,43 @@ def sub_add_MATERIAL(df, processor: MODEL.TableProcessor):
     return df
 
 def sub_add_SEGMENTO(df, processor: MODEL.TableProcessor):
-    segmento1_df = processor.GetTables('SEGMENTO_CLIENTE')
-    segmento2_df = processor.GetTables('SEGMENTO_CODIGO')
 
-    df['Cliente'] = df['Cliente'].astype(str)
-    df['MATERIAL'] = df['MATERIAL'].astype(str)
-    segmento1_df['ID_CLIENTE'] = segmento1_df['ID_CLIENTE'].astype(str)
-    segmento2_df['MATERIAL'] = segmento2_df['MATERIAL'].astype(str)
+    segmentoCliente_df = processor.GetTables('SEGMENTO_CLIENTE')
+    segmentoCodigo_df = processor.GetTables('SEGMENTO_CODIGO')
 
-    df = df.merge(
-        segmento1_df[['ID_CLIENTE', 'SEGMENTO']],
-        how='left',
-        left_on='Cliente',
-        right_on='ID_CLIENTE'
-    ).rename(columns={'SEGMENTO': 'SEG1'})
+    df['PAIS_CANAL_ID_CLIENTE'] = df['PAIS'] + df['Canal distribución'] + df['Cliente']
 
-    df = df.merge(
-        segmento2_df[['MATERIAL', 'SEGMENTO']],
-        how='left',
-        on='MATERIAL'
-    ).rename(columns={'SEGMENTO': 'SEG2'})
+    df = processor.AddColumns(
+        df=df,
+        table_name='VentaHistoricaTOTAL',
+        column_definitions={'SEGMENTO_CLIENTE': {
+                'source_table': 'SEGMENTO_CLIENTE',
+                'join_on': 'PAIS_CANAL_ID_CLIENTE',
+                'join_target': 'PAIS_CANAL_ID_CLIENTE',  
+                'source_column': 'SEGMENTO_CLIENTE'  
+            }
+        },
+        source_tables={'SEGMENTO_CLIENTE': segmentoCliente_df},
+        save_to_db=False
+    )
 
-    df['SEGMENTO'] = df['SEG1'].fillna(df['SEG2']).fillna(df['CLASIFICACION'])
+    df = processor.AddColumns(
+        df=df,
+        table_name='VentaHistoricaTOTAL',
+        column_definitions={'SEGMENTO_CODIGO': {
+                'source_table': 'SEGMENTO_CODIGO',
+                'join_on': 'MATERIAL',
+                'join_target': 'Artículo',  
+                'source_column': 'SEGMENTO'  
+            }
+        },
+        source_tables={'SEGMENTO_CODIGO': segmentoCodigo_df},
+        save_to_db=False
+    )
 
-    df.drop(columns=['SEG1', 'SEG2', 'ID_CLIENTE'], inplace=True)
+    df['SEGMENTO_FINAL'] = df['SEGMENTO_CLIENTE'].fillna(df['SEGMENTO_CODIGO']).fillna(df['CLASIFICACION'])
+
+    df.drop(columns=['PAIS_CANAL_ID_CLIENTE'], inplace=True)
 
     return df
 
@@ -304,7 +319,7 @@ def sub_add_UNIDADES(df, processor: MODEL.TableProcessor):
         if row['MATERIAL'] == "NA":
             return 0
         elif row['PAIS'] == "GUATEMALA" and row['CANAL'] == "RETAIL" and row['LINEA'] == "500-0":
-            return row['Volumen de ventas'] / 2063
+            return row['Volumen de ventas'] / 2036
         elif row['Cliente'] == "110004493":
             unidades_base = 0 if pd.isna(row['UNIDADES']) else row['UNIDADES']
             return unidades_base * row['Volumen de ventas']
@@ -357,6 +372,7 @@ def sub_add_FILTRO1(df, processor: MODEL.TableProcessor):
                     "TEGUCIPALPAGRUPO DEWARE S.AE000000025-05",
                     "TEGUCIPALPAGRUPO DEWARE S.AE000000000-04"
                 ]
+                else "SI" if str(row['PAIS']) + str(row['CANAL']) + str(row['CLASIFICACION']) == "GUATEMALARETAILSERVICIO"
                 else "NO"
             )
         },
@@ -386,18 +402,42 @@ def sub_add_FILTRO2(df, processor: MODEL.TableProcessor):
     )
 
 def sub_add_FILTRO3(df, processor: MODEL.TableProcessor):
+    centros_df = processor.GetTables('CENTROS')
+
+    return processor.AddColumns(
+        df=df,
+        table_name='VentaHistoricaTOTAL',
+        column_definitions={
+            'FILTRO3': {
+            'source_table': 'CENTROS',
+            'join_on': 'CENTRO',
+            'join_target': 'Centro', 
+            'source_column': 'FILTRO_CENTRO'       
+            }
+        },
+
+        source_tables={
+            'CENTROS': centros_df
+        },
+        save_to_db=False
+
+    )
+
+def sub_add_FILTRO4(df, processor: MODEL.TableProcessor):
    
     return processor.AddColumns(
         df=df,
         table_name='VentaHistoricaTOTAL',
         column_definitions={
-            'FILTRO3': lambda row: (
-                "SI" if str(row['FILTRO1']) + str(row['FILTRO2']) == "SISI"
+            'FILTRO4': lambda row: (
+                "SI" if str(row['FILTRO1']) + str(row['FILTRO2']) + str(row['FILTRO3'])== "SISISI"
                 else "NO"
             )
         },
         save_to_db=False
     )
+
+
 
 #----------------------------------------------------
 
@@ -519,7 +559,7 @@ def _completarVentaHistorica(processor: MODEL.TableProcessor):
 
     steps = [
         ("PAIS", sub_add_PAIS),
-        ("CENTRO", sub_add_CENTROS),
+        ("CENTRO_FINAL", sub_add_CENTROS),
         ("CANAL", sub_add_CANAL),
         ("CLIENTE DESCRIPCION", sub_add_CLIENTE_DESCRPCION),
         ("CLASIFICACION", sub_add_CLASIFICACION),
@@ -536,6 +576,7 @@ def _completarVentaHistorica(processor: MODEL.TableProcessor):
         ("FILTRO1", sub_add_FILTRO1),
         ("FILTRO2", sub_add_FILTRO2),
         ("FILTRO3", sub_add_FILTRO3),
+        ("FILTRO4", sub_add_FILTRO4)
     ]
 
     print("\nProcesando columnas en VentaHistoricaTOTAL...\n")
@@ -554,11 +595,11 @@ def _completarVentaHistorica(processor: MODEL.TableProcessor):
 
 def _pivotearDescargar_VENTA_BRUTA(processor: MODEL.TableProcessor):
     df = processor.GetTables('VentaHistoricaTOTAL')
-    df = df[df['FILTRO3'] == 'SI']
+    df = df[df['FILTRO4'] == 'SI']
 
     pivot_df = pd.pivot_table(
         df,
-        index=['PAIS', 'CANAL', 'CLASIFICACION', 'SEGMENTO', 'FAMILIA', 'LINEA', 'CENTROS', 'MATERIAL', 'DESCRIPTION'],
+        index=['PAIS', 'CANAL', 'CLASIFICACION', 'SEGMENTO', 'FAMILIA', 'LINEA', 'CENTRO_FINAL', 'MATERIAL', 'DESCRIPTION'],
         columns=['Período/Año'],
         values=['UNIDADES', 'MONTO_USD', 'GALONES'],
         aggfunc='sum',
@@ -577,7 +618,7 @@ def _pivotearDescargar_VENTA_NETA(processor: MODEL.TableProcessor):
 
     pivot_df = pd.pivot_table(
         df,
-        index=['PAIS', 'CANAL', 'CLASIFICACION', 'SEGMENTO', 'FAMILIA', 'LINEA', 'CENTROS', 'MATERIAL', 'DESCRIPTION'],
+        index=['PAIS', 'CANAL', 'CLASIFICACION', 'SEGMENTO', 'FAMILIA', 'LINEA', 'CENTRO_FINAL', 'MATERIAL', 'DESCRIPTION'],
         columns=['Período/Año'],
         values=['UNIDADES', 'MONTO_USD', 'GALONES'],
         aggfunc='sum',
@@ -590,3 +631,22 @@ def _pivotearDescargar_VENTA_NETA(processor: MODEL.TableProcessor):
     processor.SetTable('pivot_result_NETA', pivot_df)
     print(pivot_df)
     processor.ExportToExcel(table_name='pivot_result_NETA', sheet_name="Sheet01")
+
+def _pivotearDescargar_VENTA_POR_CANAL(processor: MODEL.TableProcessor):
+    df = processor.GetTables('VentaHistoricaTOTAL')
+
+    pivot_df = pd.pivot_table(
+        df,
+        index=['PAIS', 'CANAL'],
+        columns=['Período/Año'],
+        values=['Valor Neto', 'MONTO_USD', 'GALONES'],
+        aggfunc='sum',
+        fill_value=0  
+    )
+
+    pivot_df.columns = ['{}_{}'.format(val, col) for val, col in pivot_df.columns]
+    pivot_df = pivot_df.reset_index()
+
+    processor.SetTable('pivot_venta_canal', pivot_df)
+    print(pivot_df)
+    processor.ExportToExcel(table_name='pivot_venta_canal', sheet_name="Sheet01")
